@@ -1,0 +1,116 @@
+version: '3'
+
+networks:
+  rede01:
+    driver: bridge
+
+volumes:
+  kafka-data-volume:
+    external: true
+  spark-data-volume:
+    external: true
+  mongo-external:
+    external: true
+
+services:
+  zookeeper:
+    image: wurstmeister/zookeeper:latest
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    networks:
+      - rede01
+
+  kafka:
+    image: wurstmeister/kafka:latest
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka:9093,OUTSIDE://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_LISTENERS: INSIDE://0.0.0.0:9093,OUTSIDE://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+    networks:
+      - rede01
+    volumes:
+      - kafka-data-volume:/kafka
+
+  spark-master:
+    build:
+      context: ./spark-master
+      dockerfile: Dockerfile 
+    container_name: spark-master
+    environment:
+      - SPARK_MODE=master
+    ports:
+      - "8080:8080"
+    networks:
+      - rede01
+    volumes:
+      - spark-data-volume:/bitnami
+      
+
+  spark-worker-1:
+    image: bitnami/spark:latest
+    container_name: spark-worker-1
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+    depends_on:
+      - spark-master
+    networks:
+      - rede01
+    volumes:
+      - spark-data-volume:/bitnami
+
+  spark-worker-2:
+    image: bitnami/spark:latest
+    container_name: spark-worker-2
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+    depends_on:
+      - spark-master
+    networks:
+      - rede01
+    volumes:
+      - spark-data-volume:/bitnami
+
+  db:
+    image: postgres:latest
+    container_name: postgres
+    environment:
+      POSTGRES_DB: sparkdb
+      POSTGRES_USER: spark
+      POSTGRES_PASSWORD: 12345
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data:/var/lib/postgresql/data
+    networks:
+      - rede01
+
+  mongo:
+    image: mongo:latest
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "spark"
+      MONGO_INITDB_ROOT_PASSWORD: "12345"
+    volumes:
+      - mongo-external:/data/db
+    networks:
+      - rede01
+    command: --replSet rs0
+
+  airflow:
+    image: apache/airflow:latest
+    container_name: airflow
+    ports:
+      - "8081:8080"  # Ajuste a porta conforme necessário
+    networks:
+      - rede01
+
